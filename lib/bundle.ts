@@ -18,6 +18,16 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** Turns an app name into a safe, human-readable file/folder name. */
+export function sanitizeFilename(title: string): string {
+  const cleaned = title
+    .trim()
+    .replace(/[\\/:*?"<>|]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned || "My App";
+}
+
 /** Strips a single leading/trailing markdown code fence, e.g. ```html ... ``` */
 export function stripCodeFences(code: string): string {
   const trimmed = code.trim();

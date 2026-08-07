@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { buildOutputHtml, type BuildMode } from "@/lib/bundle";
+import JSZip from "jszip";
+import { buildOutputHtml, sanitizeFilename, type BuildMode } from "@/lib/bundle";
 import { EMOJI_OPTIONS, fileToDataUrl, generateEmojiIcon, generateInitialsIcon } from "@/lib/icon";
+import { saveAppToFolder, supportsFolderSave } from "@/lib/save";
 
 type IconMode = "auto" | "upload" | "emoji";
 
@@ -64,6 +66,16 @@ export default function Home() {
   const hasCode =
     mode === "single" ? singleCode.trim().length > 0 : (htmlPart + cssPart + jsPart).trim().length > 0;
 
+  const folderName = sanitizeFilename(title);
+
+  const [folderSaveSupported, setFolderSaveSupported] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setFolderSaveSupported(supportsFolderSave());
+  }, []);
+
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -72,16 +84,37 @@ export default function Home() {
     setIconMode("upload");
   }
 
-  function handleDownload() {
-    const blob = new Blob([outputHtml], { type: "text/html" });
+  async function handleSaveToFolder() {
+    setSaving(true);
+    setSaveStatus("");
+    try {
+      await saveAppToFolder(outputHtml, folderName);
+      setSaveStatus(`Saved — look for the "${folderName}" folder where you chose to save it.`);
+    } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // user cancelled the picker, nothing to report
+      } else {
+        console.error(err);
+        setSaveStatus("Couldn't save directly — try the .zip download instead.");
+      }
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDownloadZip() {
+    const zip = new JSZip();
+    zip.folder(folderName)?.file("index.html", outputHtml);
+    const blob = await zip.generateAsync({ type: "blob" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "index.html";
+    a.download = `${folderName}.zip`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    setSaveStatus(`Downloaded "${folderName}.zip" — double-click it to unzip into a "${folderName}" folder.`);
   }
 
   function loadExample() {
@@ -268,16 +301,42 @@ export default function Home() {
 
         {/* Right: preview + download */}
         <div className="flex flex-col">
-          <div className="flex items-center justify-between px-6 py-3 border-b border-white/10">
-            <span className="text-sm text-white/60">Live preview</span>
-            <button
-              type="button"
-              onClick={handleDownload}
-              disabled={!hasCode}
-              className="px-5 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm"
-            >
-              Download index.html
-            </button>
+          <div className="px-6 py-3 border-b border-white/10">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-white/60">Live preview</span>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              {folderSaveSupported ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleSaveToFolder}
+                    disabled={!hasCode || saving}
+                    className="px-5 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm"
+                  >
+                    {saving ? "Saving…" : "Save app to folder…"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDownloadZip}
+                    disabled={!hasCode}
+                    className="text-xs text-indigo-300 hover:text-indigo-200 underline disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    or download .zip
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleDownloadZip}
+                  disabled={!hasCode}
+                  className="px-5 py-2 rounded-lg bg-indigo-500 hover:bg-indigo-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm"
+                >
+                  Download app (.zip)
+                </button>
+              )}
+            </div>
+            {saveStatus && <p className="text-xs text-white/50 mt-2">{saveStatus}</p>}
           </div>
           <div className="flex-1 bg-white min-h-[420px]">
             {hasCode ? (
@@ -294,8 +353,9 @@ export default function Home() {
             )}
           </div>
           <div className="px-6 py-3 border-t border-white/10 text-xs text-white/40">
-            After downloading, double-click <code className="bg-white/10 px-1 rounded">index.html</code> to open it
-            in your browser — no server or install needed.
+            {folderSaveSupported
+              ? `"Save app to folder…" lets you pick a location — like your Desktop — and creates a "${folderName}" folder there with index.html inside, ready to open.`
+              : `The .zip unzips into a "${folderName}" folder — drag it to your Desktop, then open index.html inside to launch your app.`}
           </div>
         </div>
       </main>
